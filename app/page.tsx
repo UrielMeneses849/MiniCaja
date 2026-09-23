@@ -153,6 +153,7 @@ function summarize(shift: Shift) {
   const sales = { cash: 0, card: 0, transfer: 0 };
   let providerTotal = 0;
   let providerCash = 0;
+  let providerCount = 0;
   let entries = 0;
   let withdrawals = 0;
   let expenses = 0;
@@ -178,6 +179,7 @@ function summarize(shift: Shift) {
     }
     if (movement.kind === "provider") {
       providerTotal += movement.amount;
+      providerCount += 1;
       if (movement.affectsCash) providerCash += movement.amount;
     }
     if (movement.kind === "entry") {
@@ -199,7 +201,8 @@ function summarize(shift: Shift) {
   const difference = shift.countedCash == null ? null : shift.countedCash - expectedCash;
   const averageTicket = saleCount ? salesTotal / saleCount : 0;
   const topProducts = [...products.values()].sort((a, b) => b.revenue - a.revenue || b.units - a.units).slice(0, 5);
-  return { sales, salesTotal, saleCount, unitsSold, averageTicket, topProducts, providerTotal, providerCash, entries, withdrawals, expenses, otherCashNet, expectedCash, difference };
+  const topProductsByUnits = [...products.values()].sort((a, b) => b.units - a.units || b.revenue - a.revenue).slice(0, 10);
+  return { sales, salesTotal, saleCount, unitsSold, averageTicket, topProducts, topProductsByUnits, providerTotal, providerCash, providerCount, entries, withdrawals, expenses, otherCashNet, expectedCash, difference };
 }
 
 let poppinsFonts: Promise<{ regular: string; semibold: string }> | null = null;
@@ -288,137 +291,173 @@ async function createPdf(shift: Shift) {
     doc.setFillColor(paper);
     doc.rect(0, 0, pageWidth, pageHeight, "F");
   };
+  const chartColors = [green, coral, blue, lime, "#8C79C6", "#E7B65E", "#4F9C8B", "#D97B9A", "#6F8FBE", "#A1B95B"];
+  const drawPieSlice = (centerX: number, centerY: number, radius: number, start: number, end: number, color: string) => {
+    doc.setFillColor(color);
+    const steps = Math.max(1, Math.ceil((end - start) / (Math.PI / 30)));
+    for (let index = 0; index < steps; index += 1) {
+      const angleA = start + (end - start) * index / steps - 0.002;
+      const angleB = start + (end - start) * (index + 1) / steps + 0.002;
+      doc.triangle(centerX, centerY, centerX + Math.cos(angleA) * radius, centerY + Math.sin(angleA) * radius, centerX + Math.cos(angleB) * radius, centerY + Math.sin(angleB) * radius, "F");
+    }
+  };
 
   paintPage();
   doc.setFillColor(green);
-  doc.roundedRect(margin, 28, pageWidth - margin * 2, 126, 17, 17, "F");
+  doc.roundedRect(margin, 24, pageWidth - margin * 2, 88, 17, 17, "F");
   doc.setFillColor(white);
-  doc.roundedRect(54, 46, 32, 32, 8, 8, "F");
+  doc.roundedRect(52, 43, 32, 32, 8, 8, "F");
   doc.setDrawColor(green);
   doc.setLineWidth(1.6);
-  doc.line(63, 55, 77, 55);
-  doc.line(63, 61, 77, 61);
-  doc.line(63, 67, 73, 67);
-  setFont(12, "bold", white);
-  doc.text("MiniCaja", 98, 66);
-  const pillWidth = 98;
+  doc.line(61, 52, 75, 52);
+  doc.line(61, 58, 75, 58);
+  doc.line(61, 64, 71, 64);
+  setFont(11, "bold", white);
+  doc.text("MiniCaja", 94, 62);
+  setFont(19, "bold", white);
+  doc.text("Corte de caja", 188, 59);
+  setFont(7.5, "normal", "#D8E9E1");
+  doc.text(`${dateLabel} · ${timeLabel}`, 188, 80);
+  const pillWidth = 92;
   doc.setFillColor(difference < 0 ? coral : lime);
-  doc.roundedRect(pageWidth - margin - pillWidth - 18, 47, pillWidth, 27, 13.5, 13.5, "F");
-  setFont(7.5, "bold", green);
-  doc.text(resultLabel, pageWidth - margin - pillWidth / 2 - 18, 64.5, { align: "center", charSpace: 0.55 });
-  setFont(23, "bold", white);
-  doc.text("Corte de caja", 54, 113);
-  setFont(8.5, "normal", "#D8E9E1");
-  doc.text(`${dateLabel}  ·  ${timeLabel}`, 54, 134);
+  doc.roundedRect(pageWidth - margin - pillWidth - 16, 45, pillWidth, 26, 13, 13, "F");
+  setFont(7.2, "bold", green);
+  doc.text(resultLabel, pageWidth - margin - pillWidth / 2 - 16, 62, { align: "center", charSpace: 0.45 });
 
-  const kpiY = 172;
+  const kpiY = 124;
   const kpiGap = 9;
   const kpiWidth = (pageWidth - margin * 2 - kpiGap * 2) / 3;
   [
-    { label: "EFECTIVO ESPERADO", value: format(summary.expectedCash), color: mint },
-    { label: "EFECTIVO CONTADO", value: format(shift.countedCash ?? 0), color: white },
-    { label: "DIFERENCIA", value: `${difference > 0 ? "+" : ""}${format(difference)}`, color: difference === 0 ? "#F0F8DA" : "#FFF0E9" },
+    { label: "EFECTIVO ESPERADO", value: format(summary.expectedCash), helper: "Base + efectivo - salidas", color: mint },
+    { label: "EFECTIVO CONTADO", value: format(shift.countedCash ?? 0), helper: "Conteo físico de la caja", color: white },
+    { label: "DIFERENCIA", value: `${difference > 0 ? "+" : ""}${format(difference)}`, helper: "Contado - esperado", color: difference === 0 ? "#F0F8DA" : "#FFF0E9" },
   ].forEach((item, index) => {
     const x = margin + index * (kpiWidth + kpiGap);
-    card(x, kpiY, kpiWidth, 72, item.color);
-    setFont(6.8, "bold", muted);
-    doc.text(item.label, x + 14, kpiY + 21, { charSpace: 0.55 });
-    setFont(15.5, "bold", ink);
-    doc.text(item.value, x + 14, kpiY + 49);
+    card(x, kpiY, kpiWidth, 64, item.color);
+    setFont(6.4, "bold", muted);
+    doc.text(item.label, x + 13, kpiY + 17, { charSpace: 0.45 });
+    setFont(14.5, "bold", ink);
+    doc.text(item.value, x + 13, kpiY + 41);
+    setFont(6.1, "normal", muted);
+    doc.text(item.helper, x + 13, kpiY + 55);
   });
 
-  const panelY = 262;
+  const panelY = 202;
   const panelGap = 12;
   const panelWidth = (pageWidth - margin * 2 - panelGap) / 2;
-  card(margin, panelY, panelWidth, 168);
-  sectionTitle("Ventas por método", margin + 16, panelY + 24);
-  setFont(19, "bold", ink);
-  doc.text(format(summary.salesTotal), margin + 16, panelY + 51);
-  setFont(7.5, "normal", muted);
-  doc.text("ventas totales", margin + 16, panelY + 67);
+  card(margin, panelY, panelWidth, 150);
+  sectionTitle("Ventas por método", margin + 15, panelY + 21);
+  setFont(16, "bold", ink);
+  doc.text(format(summary.salesTotal), margin + 15, panelY + 44);
+  setFont(6.4, "normal", muted);
+  doc.text("Tarjeta y transferencia no entran a la caja física.", margin + 15, panelY + 58);
   const paymentRows = [
     { label: "Efectivo", value: summary.sales.cash, color: green },
     { label: "Tarjeta", value: summary.sales.card, color: blue },
     { label: "Transferencia", value: summary.sales.transfer, color: coral },
   ];
   paymentRows.forEach((row, index) => {
-    const y = panelY + 88 + index * 24;
-    setFont(7.5, "normal", ink);
-    doc.text(row.label, margin + 16, y);
-    setFont(7.5, "bold", ink);
-    doc.text(format(row.value), margin + panelWidth - 16, y, { align: "right" });
+    const y = panelY + 78 + index * 22;
+    setFont(7.1, "normal", ink);
+    doc.text(row.label, margin + 15, y);
+    setFont(7.1, "bold", ink);
+    doc.text(format(row.value), margin + panelWidth - 15, y, { align: "right" });
     doc.setFillColor("#EDF0EA");
-    doc.roundedRect(margin + 16, y + 6, panelWidth - 32, 5, 2.5, 2.5, "F");
+    doc.roundedRect(margin + 15, y + 5, panelWidth - 30, 4, 2, 2, "F");
     if (row.value > 0 && summary.salesTotal > 0) {
       doc.setFillColor(row.color);
-      doc.roundedRect(margin + 16, y + 6, Math.max(5, (panelWidth - 32) * row.value / summary.salesTotal), 5, 2.5, 2.5, "F");
+      doc.roundedRect(margin + 15, y + 5, Math.max(4, (panelWidth - 30) * row.value / summary.salesTotal), 4, 2, 2, "F");
     }
   });
 
   const cashX = margin + panelWidth + panelGap;
-  card(cashX, panelY, panelWidth, 168);
-  sectionTitle("Flujo de efectivo", cashX + 16, panelY + 24);
+  card(cashX, panelY, panelWidth, 150);
+  sectionTitle("Caja física: cómo se forma", cashX + 15, panelY + 21);
   const cashRows = [
     ["Base inicial", shift.base, "+"],
     ["Ventas en efectivo", summary.sales.cash, "+"],
-    ["Proveedores", summary.providerCash, "−"],
+    ["Proveedores en efectivo", summary.providerCash, "−"],
     ["Otros movimientos", Math.abs(summary.otherCashNet), summary.otherCashNet >= 0 ? "+" : "−"],
   ] as const;
   cashRows.forEach(([label, value, sign], index) => {
-    const y = panelY + 52 + index * 24;
-    setFont(7.8, "normal", muted);
-    doc.text(label, cashX + 16, y);
-    setFont(8, "bold", ink);
-    doc.text(`${sign} ${format(value)}`, cashX + panelWidth - 16, y, { align: "right" });
+    const y = panelY + 43 + index * 21;
+    setFont(7.2, "normal", muted);
+    doc.text(label, cashX + 15, y);
+    setFont(7.3, "bold", ink);
+    doc.text(`${sign} ${format(value)}`, cashX + panelWidth - 15, y, { align: "right" });
     if (index < cashRows.length - 1) {
       doc.setDrawColor(border);
-      doc.line(cashX + 16, y + 9, cashX + panelWidth - 16, y + 9);
+      doc.line(cashX + 15, y + 7, cashX + panelWidth - 15, y + 7);
     }
   });
   doc.setFillColor(mint);
-  doc.roundedRect(cashX + 12, panelY + 139, panelWidth - 24, 20, 8, 8, "F");
-  setFont(7.4, "bold", green);
-  doc.text("EFECTIVO ESPERADO", cashX + 22, panelY + 152.5);
-  doc.text(format(summary.expectedCash), cashX + panelWidth - 22, panelY + 152.5, { align: "right" });
+  doc.roundedRect(cashX + 12, panelY + 121, panelWidth - 24, 21, 8, 8, "F");
+  setFont(7, "bold", green);
+  doc.text("EFECTIVO ESPERADO", cashX + 21, panelY + 135);
+  doc.text(format(summary.expectedCash), cashX + panelWidth - 21, panelY + 135, { align: "right" });
 
-  card(margin, 448, pageWidth - margin * 2, 70);
-  sectionTitle("El turno en números", margin + 16, 471);
+  card(margin, 366, pageWidth - margin * 2, 60);
+  sectionTitle("El turno en números", margin + 15, 385);
   [
-    [String(summary.saleCount), "Tickets"],
-    [String(summary.unitsSold), "Artículos"],
-    [format(summary.averageTicket), "Ticket promedio"],
-    [format(summary.providerTotal), "Proveedores"],
+    [String(summary.saleCount), "Ventas realizadas"],
+    [String(summary.unitsSold), "Artículos vendidos"],
+    [format(summary.salesTotal), "Total vendido"],
+    [format(summary.providerTotal), "Gasto proveedores"],
   ].forEach(([value, label], index) => {
-    const x = margin + 16 + index * 127;
-    setFont(12, "bold", ink);
-    doc.text(value, x, 495);
-    setFont(6.8, "normal", muted);
-    doc.text(label, x, 508);
+    const x = margin + 15 + index * 128;
+    setFont(11, "bold", ink);
+    doc.text(value, x, 407);
+    setFont(6.4, "normal", muted);
+    doc.text(label, x, 418);
   });
 
-  card(margin, 536, pageWidth - margin * 2, 208);
-  sectionTitle("Productos destacados", margin + 16, 560);
-  if (!summary.topProducts.length) {
+  card(margin, 440, pageWidth - margin * 2, 60);
+  sectionTitle("Resumen de proveedores", margin + 15, 459);
+  [
+    [String(summary.providerCount), "Pagos registrados"],
+    [format(summary.providerTotal), "Gasto total"],
+    [format(summary.providerCash), "Pagado en efectivo"],
+    [format(summary.providerTotal - summary.providerCash), "Pagado fuera de caja"],
+  ].forEach(([value, label], index) => {
+    const x = margin + 15 + index * 128;
+    setFont(10.5, "bold", ink);
+    doc.text(value, x, 480);
+    setFont(6.2, "normal", muted);
+    doc.text(label, x, 491);
+  });
+
+  card(margin, 514, pageWidth - margin * 2, 234);
+  sectionTitle("Top 10 productos más vendidos", margin + 15, 535);
+  setFont(6.4, "normal", muted);
+  doc.text("Participación por unidades vendidas", margin + 15, 548);
+  if (!summary.topProductsByUnits.length) {
     setFont(8.5, "normal", muted);
-    doc.text("Aún no hay productos con detalle en este turno.", margin + 16, 594);
+    doc.text("Aún no hay productos con detalle en este turno.", margin + 15, 583);
   } else {
-    const maxRevenue = Math.max(...summary.topProducts.map((product) => product.revenue), 1);
-    summary.topProducts.forEach((product, index) => {
-      const y = 586 + index * 29;
-      doc.setFillColor(index === 0 ? lime : "#EDF0EA");
-      doc.circle(margin + 27, y - 2, 9, "F");
-      setFont(7.5, "bold", green);
-      doc.text(String(index + 1), margin + 27, y + 0.5, { align: "center" });
-      setFont(8, "bold", ink);
-      doc.text(shortText(product.name, 31), margin + 44, y);
-      setFont(7.5, "normal", muted);
-      doc.text(`${product.units} uds`, margin + 263, y, { align: "right" });
-      doc.setFillColor("#EDF0EA");
-      doc.roundedRect(margin + 281, y - 7, 142, 7, 3.5, 3.5, "F");
-      doc.setFillColor(index === 0 ? green : "#7FA795");
-      doc.roundedRect(margin + 281, y - 7, Math.max(6, 142 * product.revenue / maxRevenue), 7, 3.5, 3.5, "F");
-      setFont(8, "bold", ink);
-      doc.text(format(product.revenue), pageWidth - margin - 16, y, { align: "right" });
+    const totalTopUnits = summary.topProductsByUnits.reduce((sum, product) => sum + product.units, 0);
+    let angle = -Math.PI / 2;
+    summary.topProductsByUnits.forEach((product, index) => {
+      const nextAngle = angle + Math.PI * 2 * product.units / totalTopUnits;
+      drawPieSlice(130, 637, 62, angle, nextAngle, chartColors[index]);
+      angle = nextAngle;
+    });
+    doc.setFillColor(white);
+    doc.circle(130, 637, 33, "F");
+    setFont(15, "bold", ink);
+    doc.text(String(totalTopUnits), 130, 635, { align: "center" });
+    setFont(6.4, "normal", muted);
+    doc.text("unidades", 130, 649, { align: "center" });
+    summary.topProductsByUnits.forEach((product, index) => {
+      const y = 566 + index * 17;
+      const share = Math.round(product.units / totalTopUnits * 100);
+      doc.setFillColor(chartColors[index]);
+      doc.circle(222, y - 2, 4, "F");
+      setFont(7, index === 0 ? "bold" : "normal", ink);
+      doc.text(`${index + 1}. ${shortText(product.name, 24)}`, 232, y);
+      setFont(6.8, "normal", muted);
+      doc.text(`${product.units} uds`, 505, y, { align: "right" });
+      setFont(6.8, "bold", ink);
+      doc.text(`${share}%`, pageWidth - margin - 16, y, { align: "right" });
     });
   }
   footer(1);
