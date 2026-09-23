@@ -97,6 +97,7 @@ declare global {
 }
 
 const STORAGE_KEY = "minicaja:current-shift:v1";
+const APP_BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 const paymentLabels: Record<PaymentMethod, string> = {
   cash: "Efectivo",
   card: "Tarjeta",
@@ -219,11 +220,11 @@ function arrayBufferToBase64(buffer: ArrayBuffer) {
 function loadPoppinsFonts() {
   if (!poppinsFonts) {
     poppinsFonts = Promise.all([
-      fetch("/fonts/Poppins-Regular.ttf").then((response) => {
+      fetch(`${APP_BASE_PATH}/fonts/Poppins-Regular.ttf`).then((response) => {
         if (!response.ok) throw new Error("No se pudo cargar Poppins Regular");
         return response.arrayBuffer();
       }),
-      fetch("/fonts/Poppins-SemiBold.ttf").then((response) => {
+      fetch(`${APP_BASE_PATH}/fonts/Poppins-SemiBold.ttf`).then((response) => {
         if (!response.ok) throw new Error("No se pudo cargar Poppins SemiBold");
         return response.arrayBuffer();
       }),

@@ -2,12 +2,13 @@
   "name": "MiniCaja",
   "short_name": "MiniCaja",
   "description": "Ventas, movimientos y cierre de caja desde tu teléfono.",
-  "start_url": "/",
+  "start_url": "./",
+  "scope": "./",
   "display": "standalone",
   "background_color": "#f5f5ef",
   "theme_color": "#0f5137",
   "orientation": "portrait-primary",
   "icons": [
-    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+    { "src": "./favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
   ]
 }

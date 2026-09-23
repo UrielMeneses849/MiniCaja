@@ -4,17 +4,18 @@ import "./globals.css";
 import { RegisterServiceWorker } from "./register-sw";
 
 const manrope = Manrope({ subsets: ["latin"], variable: "--font-manrope" });
+const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
 export const metadata: Metadata = {
   title: "MiniCaja",
   description: "Ventas, movimientos y cierre de caja desde tu teléfono.",
   applicationName: "MiniCaja",
-  manifest: "/manifest.webmanifest",
+  manifest: `${basePath}/manifest.webmanifest`,
   appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "MiniCaja" },
   icons: {
-    icon: "/favicon.svg",
-    shortcut: "/favicon.svg",
-    apple: "/favicon.svg",
+    icon: `${basePath}/favicon.svg`,
+    shortcut: `${basePath}/favicon.svg`,
+    apple: `${basePath}/favicon.svg`,
   },
 };
 

@@ -1,7 +1,9 @@
-const CACHE = "minicaja-v2";
+const CACHE = "minicaja-v3";
+const BASE_PATH = new URL(self.registration.scope).pathname.replace(/\/$/, "");
+const asset = (path) => `${BASE_PATH}${path}`;
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(["/", "/manifest.webmanifest", "/favicon.svg", "/fonts/Poppins-Regular.ttf", "/fonts/Poppins-SemiBold.ttf"])));
+  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll([asset("/"), asset("/manifest.webmanifest"), asset("/favicon.svg"), asset("/fonts/Poppins-Regular.ttf"), asset("/fonts/Poppins-SemiBold.ttf")])));
   self.skipWaiting();
 });
 
@@ -16,5 +18,5 @@ self.addEventListener("fetch", (event) => {
     const copy = response.clone();
     caches.open(CACHE).then((cache) => cache.put(event.request, copy));
     return response;
-  }).catch(() => caches.match(event.request).then((cached) => cached || caches.match("/"))));
+  }).catch(() => caches.match(event.request).then((cached) => cached || caches.match(asset("/")))));
 });
