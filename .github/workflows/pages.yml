@@ -39,6 +39,9 @@ jobs:
           GITHUB_PAGES: "true"
           NEXT_PUBLIC_BASE_PATH: "/MiniCaja"
 
+      - name: Verificar página de inicio
+        run: test -f dist/client/index.html
+
       - name: Configurar GitHub Pages
         uses: actions/configure-pages@v5
 
