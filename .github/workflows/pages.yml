@@ -28,7 +28,10 @@ jobs:
           cache: npm
 
       - name: Instalar dependencias
-        run: npm ci
+        # npm 10 (incluido con Node 22 en Actions) valida de forma distinta las
+        # dependencias opcionales específicas de plataforma generadas por npm 11.
+        # `npm install` reconcilia esas entradas antes de construir el sitio.
+        run: npm install --include=dev --include=optional --no-audit --no-fund
 
       - name: Construir versión estática
         run: npm run build
