@@ -5,6 +5,7 @@ import {
   ArrowLeft,
   ArrowUpRight,
   Banknote,
+  BarChart3,
   Building2,
   Check,
   ChevronRight,
@@ -15,12 +16,16 @@ import {
   HandCoins,
   Home,
   Landmark,
+  Minus,
+  Package,
   Pencil,
   Plus,
   ReceiptText,
   RotateCcw,
   Share2,
   Smartphone,
+  ShoppingCart,
+  TrendingUp,
   Trash2,
   WalletCards,
 } from "lucide-react";
@@ -45,6 +50,13 @@ type PaymentMethod = "cash" | "card" | "transfer";
 type MovementKind = "sale" | "provider" | "entry" | "withdrawal" | "expense";
 type ShiftStatus = "open" | "closed";
 
+type SaleItem = {
+  id: string;
+  name: string;
+  quantity: number;
+  unitPrice: number;
+};
+
 type Movement = {
   id: string;
   kind: MovementKind;
@@ -54,6 +66,7 @@ type Movement = {
   paymentMethod: PaymentMethod;
   affectsCash: boolean;
   createdAt: string;
+  items?: SaleItem[];
 };
 
 type Shift = {
@@ -112,6 +125,30 @@ function safeNumber(value: string | number) {
   return Number.isFinite(parsed) && parsed >= 0 ? Math.round(parsed * 100) / 100 : 0;
 }
 
+function saleItemsFor(movement: Movement): SaleItem[] {
+  if (movement.kind !== "sale") return [];
+  if (movement.items?.length) return movement.items;
+  return [{
+    id: `${movement.id}-legacy`,
+    name: movement.note || "Venta sin detalle",
+    quantity: 1,
+    unitPrice: movement.amount,
+  }];
+}
+
+function getProductSuggestions(shift: Shift) {
+  const products = new Map<string, { name: string; unitPrice: number; uses: number }>();
+  shift.movements.forEach((movement) => {
+    saleItemsFor(movement).forEach((item) => {
+      const key = item.name.trim().toLocaleLowerCase("es-MX");
+      if (!key || item.name === "Venta sin detalle") return;
+      const current = products.get(key);
+      products.set(key, { name: item.name.trim(), unitPrice: item.unitPrice, uses: (current?.uses ?? 0) + item.quantity });
+    });
+  });
+  return [...products.values()].sort((a, b) => b.uses - a.uses).slice(0, 6);
+}
+
 function summarize(shift: Shift) {
   const sales = { cash: 0, card: 0, transfer: 0 };
   let providerTotal = 0;
@@ -120,9 +157,25 @@ function summarize(shift: Shift) {
   let withdrawals = 0;
   let expenses = 0;
   let otherCashNet = 0;
+  let saleCount = 0;
+  let unitsSold = 0;
+  const products = new Map<string, { name: string; units: number; revenue: number }>();
 
   shift.movements.forEach((movement) => {
-    if (movement.kind === "sale") sales[movement.paymentMethod] += movement.amount;
+    if (movement.kind === "sale") {
+      sales[movement.paymentMethod] += movement.amount;
+      saleCount += 1;
+      saleItemsFor(movement).forEach((item) => {
+        unitsSold += item.quantity;
+        const key = item.name.trim().toLocaleLowerCase("es-MX");
+        const current = products.get(key);
+        products.set(key, {
+          name: item.name.trim(),
+          units: (current?.units ?? 0) + item.quantity,
+          revenue: (current?.revenue ?? 0) + item.quantity * item.unitPrice,
+        });
+      });
+    }
     if (movement.kind === "provider") {
       providerTotal += movement.amount;
       if (movement.affectsCash) providerCash += movement.amount;
@@ -144,7 +197,9 @@ function summarize(shift: Shift) {
   const salesTotal = sales.cash + sales.card + sales.transfer;
   const expectedCash = shift.base + sales.cash - providerCash + otherCashNet;
   const difference = shift.countedCash == null ? null : shift.countedCash - expectedCash;
-  return { sales, salesTotal, providerTotal, providerCash, entries, withdrawals, expenses, otherCashNet, expectedCash, difference };
+  const averageTicket = saleCount ? salesTotal / saleCount : 0;
+  const topProducts = [...products.values()].sort((a, b) => b.revenue - a.revenue || b.units - a.units).slice(0, 5);
+  return { sales, salesTotal, saleCount, unitsSold, averageTicket, topProducts, providerTotal, providerCash, entries, withdrawals, expenses, otherCashNet, expectedCash, difference };
 }
 
 function ascii(value: string) {
@@ -178,6 +233,12 @@ function createPdf(shift: Shift) {
     `Efectivo esperado: ${money.format(summary.expectedCash)}`,
     `Efectivo contado: ${money.format(shift.countedCash ?? 0)}`,
     `Diferencia: ${money.format(summary.difference ?? 0)}`,
+    "",
+    "INDICADORES DEL TURNO",
+    `Tickets: ${summary.saleCount}`,
+    `Articulos vendidos: ${summary.unitsSold}`,
+    `Ticket promedio: ${money.format(summary.averageTicket)}`,
+    ...summary.topProducts.map((product, index) => `${index + 1}. ${product.name} - ${product.units} uds - ${money.format(product.revenue)}`),
     "",
     "MOVIMIENTOS",
     ...shift.movements.map((movement) => {
@@ -338,20 +399,28 @@ export default function HomePage() {
     register({
       name: "add_sale",
       title: "Registrar venta",
-      description: "Registra una venta en el turno abierto con monto, concepto y método de pago.",
+      description: "Registra un ticket de venta con uno o varios productos y método de pago.",
       inputSchema: {
         type: "object",
-        properties: { amount: { type: "number", exclusiveMinimum: 0 }, concept: { type: "string" }, paymentMethod: { type: "string", enum: ["cash", "card", "transfer"] } },
-        required: ["amount", "paymentMethod"],
+        properties: {
+          amount: { type: "number", exclusiveMinimum: 0, description: "Monto total para una venta sin desglose." },
+          concept: { type: "string" },
+          items: { type: "array", items: { type: "object", properties: { name: { type: "string" }, quantity: { type: "integer", minimum: 1 }, unitPrice: { type: "number", exclusiveMinimum: 0 } }, required: ["name", "quantity", "unitPrice"], additionalProperties: false } },
+          paymentMethod: { type: "string", enum: ["cash", "card", "transfer"] },
+        },
+        required: ["paymentMethod"],
         additionalProperties: false,
       },
       annotations: { readOnlyHint: false, untrustedContentHint: false },
       execute(input) {
-        const data = input as { amount?: number; concept?: string; paymentMethod?: PaymentMethod };
+        const data = input as { amount?: number; concept?: string; items?: Array<{ name: string; quantity: number; unitPrice: number }>; paymentMethod?: PaymentMethod };
         const current = shiftRef.current;
         if (!current || current.status !== "open") throw new Error("No hay un turno abierto.");
-        if (!data.amount || data.amount <= 0 || !data.paymentMethod || !paymentLabels[data.paymentMethod]) throw new Error("Monto o método de pago inválido.");
-        const movement: Movement = { id: createId(), kind: "sale", amount: safeNumber(data.amount), note: String(data.concept ?? ""), party: "", paymentMethod: data.paymentMethod, affectsCash: data.paymentMethod === "cash", createdAt: new Date().toISOString() };
+        const items = data.items?.map((item) => ({ id: createId(), name: item.name.trim(), quantity: Math.max(1, Math.floor(item.quantity)), unitPrice: safeNumber(item.unitPrice) }));
+        const amount = items?.length ? items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0) : safeNumber(data.amount ?? 0);
+        if (amount <= 0 || items?.some((item) => !item.name || item.unitPrice <= 0) || !data.paymentMethod || !paymentLabels[data.paymentMethod]) throw new Error("Productos, monto o método de pago inválido.");
+        const note = items?.length ? items.map((item) => `${item.quantity}× ${item.name}`).join(", ") : String(data.concept ?? "");
+        const movement: Movement = { id: createId(), kind: "sale", amount, note, party: "", paymentMethod: data.paymentMethod, affectsCash: data.paymentMethod === "cash", createdAt: new Date().toISOString(), items };
         const next = { ...current, movements: [...current.movements, movement] };
         setShift(next);
         return { id: movement.id, saved: true, expectedCash: summarize(next).expectedCash };
@@ -397,7 +466,7 @@ export default function HomePage() {
       </header>
       <div className="workspace">
         {view === "home" && summary && <Dashboard shift={shift} summary={summary} onNavigate={goTo} onEdit={editMovement} onShare={sharePdf} onDownload={() => downloadBlob(createPdf(shift), fileName)} onNewShift={() => setShift(null)} />}
-        {view === "sale" && <SaleForm movement={editing?.kind === "sale" ? editing : null} onBack={() => goTo("home")} onSave={saveMovement} onDelete={removeMovement} />}
+        {view === "sale" && <SaleForm movement={editing?.kind === "sale" ? editing : null} suggestions={getProductSuggestions(shift)} onBack={() => goTo("home")} onSave={saveMovement} onDelete={removeMovement} />}
         {view === "movement" && <MovementForm movement={editing && editing.kind !== "sale" ? editing : null} onBack={() => goTo("home")} onSave={saveMovement} onDelete={removeMovement} />}
         {view === "close" && summary && <CloseView shift={shift} summary={summary} onClose={closeShift} onShare={sharePdf} onDownload={() => downloadBlob(createPdf(shift), fileName)} onBack={() => goTo("home")} />}
       </div>
@@ -457,11 +526,12 @@ function Dashboard({ shift, summary, onNavigate, onEdit, onShare, onDownload, on
         <div className="section-heading"><div><span className="eyebrow">Ventas del turno</span><h2>{money.format(summary.salesTotal)}</h2></div><span className="count-badge">{shift.movements.filter((item) => item.kind === "sale").length} ventas</span></div>
         <div className="method-grid"><Metric icon={Banknote} label="Efectivo" value={summary.sales.cash} tone="cash" /><Metric icon={CreditCard} label="Tarjeta" value={summary.sales.card} tone="card" /><Metric icon={Landmark} label="Transferencia" value={summary.sales.transfer} tone="transfer" /></div>
       </section>
+      <InsightPanel summary={summary} />
       <section className="summary-grid"><article><span className="metric-icon provider"><Building2 /></span><small>Proveedores</small><strong>{money.format(summary.providerTotal)}</strong><p>{money.format(summary.providerCash)} salió de caja</p></article><article><span className="metric-icon other"><WalletCards /></span><small>Otros movimientos</small><strong>{money.format(summary.entries - summary.withdrawals - summary.expenses)}</strong><p>{money.format(summary.otherCashNet)} en efectivo</p></article></section>
       <section className="section-block movements-block">
         <div className="section-heading compact"><div><span className="eyebrow">Actividad</span><h2>Movimientos recientes</h2></div>{shift.status === "open" && shift.movements.length > 0 && <small>Toca para editar</small>}</div>
         {shift.movements.length === 0 ? <div className="empty-state"><span><ReceiptText /></span><strong>Aún no hay movimientos</strong><p>Tu primera venta aparecerá aquí.</p></div> : (
-          <div className="movement-list">{[...shift.movements].reverse().map((movement) => { const Icon = movementIcon(movement.kind); const PaymentIcon = methodIcon(movement.paymentMethod); return <button key={movement.id} onClick={() => shift.status === "open" && onEdit(movement)} disabled={shift.status === "closed"}><span className={`movement-symbol ${movement.kind}`}><Icon /></span><span className="movement-copy"><strong>{movement.party || movement.note || kindLabels[movement.kind]}</strong><small><PaymentIcon />{kindLabels[movement.kind]} · {paymentLabels[movement.paymentMethod]} · {new Date(movement.createdAt).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" })}</small></span><span className={`movement-amount ${isPositive(movement.kind) ? "positive" : "negative"}`}>{isPositive(movement.kind) ? "+" : "−"}{money.format(movement.amount)}</span>{shift.status === "open" && <Pencil className="edit-icon" />}</button>; })}</div>
+          <div className="movement-list">{[...shift.movements].reverse().map((movement) => { const Icon = movementIcon(movement.kind); const PaymentIcon = methodIcon(movement.paymentMethod); const itemCount = saleItemsFor(movement).reduce((sum, item) => sum + item.quantity, 0); return <button key={movement.id} onClick={() => shift.status === "open" && onEdit(movement)} disabled={shift.status === "closed"}><span className={`movement-symbol ${movement.kind}`}><Icon /></span><span className="movement-copy"><strong>{movement.party || movement.note || kindLabels[movement.kind]}</strong><small><PaymentIcon />{kindLabels[movement.kind]} · {paymentLabels[movement.paymentMethod]}{movement.kind === "sale" ? ` · ${itemCount} ${itemCount === 1 ? "artículo" : "artículos"}` : ""} · {new Date(movement.createdAt).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" })}</small></span><span className={`movement-amount ${isPositive(movement.kind) ? "positive" : "negative"}`}>{isPositive(movement.kind) ? "+" : "−"}{money.format(movement.amount)}</span>{shift.status === "open" && <Pencil className="edit-icon" />}</button>; })}</div>
         )}
       </section>
       {shift.status === "open" ? <button className="close-cta" onClick={() => onNavigate("close")}><span><Clock3 /></span><div><strong>¿Terminaste el día?</strong><small>Cuenta el efectivo y prepara tu corte</small></div><ChevronRight /></button> : (
@@ -475,6 +545,32 @@ function Metric({ icon: Icon, label, value, tone }: { icon: typeof Banknote; lab
   return <article className={`method-card ${tone}`}><span><Icon /></span><small>{label}</small><strong>{money.format(value)}</strong></article>;
 }
 
+function InsightPanel({ summary, compact = false }: { summary: ReturnType<typeof summarize>; compact?: boolean }) {
+  const maxRevenue = summary.topProducts[0]?.revenue || 1;
+  return (
+    <section className={`section-block insights-block ${compact ? "compact" : ""}`}>
+      <div className="section-heading compact"><div><span className="eyebrow">Pulso del día</span><h2>Resumen inteligente</h2></div><span className="insight-icon"><BarChart3 /></span></div>
+      <div className="insight-metrics">
+        <article><span><ReceiptText /></span><small>Tickets</small><strong>{summary.saleCount}</strong></article>
+        <article><span><Package /></span><small>Artículos</small><strong>{summary.unitsSold}</strong></article>
+        <article><span><TrendingUp /></span><small>Ticket promedio</small><strong>{money.format(summary.averageTicket)}</strong></article>
+      </div>
+      {summary.topProducts.length > 0 ? (
+        <div className="top-products">
+          <div className="top-products-heading"><strong>Productos más vendidos</strong><small>Por ingreso</small></div>
+          {summary.topProducts.slice(0, compact ? 3 : 5).map((product, index) => (
+            <div className="product-rank" key={`${product.name}-${index}`}>
+              <span className="rank-number">{index + 1}</span>
+              <div><p><strong>{product.name}</strong><small>{product.units} {product.units === 1 ? "unidad" : "unidades"}</small></p><i><b style={{ width: `${Math.max(10, (product.revenue / maxRevenue) * 100)}%` }} /></i></div>
+              <strong>{money.format(product.revenue)}</strong>
+            </div>
+          ))}
+        </div>
+      ) : <div className="insight-empty"><ShoppingCart /><span><strong>Aún no hay datos de productos</strong><small>Se llenará con los artículos de cada ticket.</small></span></div>}
+    </section>
+  );
+}
+
 function PageHeader({ title, eyebrow, onBack }: { title: string; eyebrow: string; onBack: () => void }) {
   return <div className="page-header"><button onClick={onBack} aria-label="Regresar"><ArrowLeft /></button><div><span className="eyebrow">{eyebrow}</span><h1>{title}</h1></div></div>;
 }
@@ -483,19 +579,86 @@ function PaymentPicker({ value, onChange }: { value: PaymentMethod; onChange: (v
   return <div className="payment-picker" role="radiogroup" aria-label="Método de pago">{(["cash", "card", "transfer"] as PaymentMethod[]).map((method) => { const Icon = methodIcon(method); return <button key={method} type="button" role="radio" aria-checked={value === method} className={value === method ? "active" : ""} onClick={() => onChange(method)}><Icon /><span>{paymentLabels[method]}</span>{value === method && <Check />}</button>; })}</div>;
 }
 
-function SaleForm({ movement, onBack, onSave, onDelete }: { movement: Movement | null; onBack: () => void; onSave: (movement: Omit<Movement, "id" | "createdAt">, id?: string) => void; onDelete: (id: string) => void }) {
-  const [amount, setAmount] = useState(movement ? String(movement.amount) : "");
-  const [note, setNote] = useState(movement?.note ?? "");
+function SaleForm({ movement, suggestions, onBack, onSave, onDelete }: {
+  movement: Movement | null;
+  suggestions: ReturnType<typeof getProductSuggestions>;
+  onBack: () => void;
+  onSave: (movement: Omit<Movement, "id" | "createdAt">, id?: string) => void;
+  onDelete: (id: string) => void;
+}) {
+  type DraftItem = { id: string; name: string; quantity: number; unitPrice: string };
+  const blankItem = (): DraftItem => ({ id: createId(), name: "", quantity: 1, unitPrice: "" });
+  const initialItems = movement
+    ? saleItemsFor(movement).map((item) => ({ ...item, unitPrice: String(item.unitPrice) }))
+    : [blankItem()];
+  const [items, setItems] = useState<DraftItem[]>(initialItems);
   const [method, setMethod] = useState<PaymentMethod>(movement?.paymentMethod ?? "cash");
-  function submit(event: FormEvent) { event.preventDefault(); const value = safeNumber(amount); if (value <= 0) return toast.error("Escribe un monto mayor a cero"); onSave({ kind: "sale", amount: value, note: note.trim(), party: "", paymentMethod: method, affectsCash: method === "cash" }, movement?.id); }
+  const total = items.reduce((sum, item) => sum + safeNumber(item.unitPrice) * item.quantity, 0);
+  const totalUnits = items.reduce((sum, item) => sum + item.quantity, 0);
+
+  function updateItem(id: string, patch: Partial<DraftItem>) {
+    setItems((current) => current.map((item) => item.id === id ? { ...item, ...patch } : item));
+  }
+
+  function changeQuantity(id: string, delta: number) {
+    setItems((current) => current.map((item) => item.id === id ? { ...item, quantity: Math.max(1, item.quantity + delta) } : item));
+  }
+
+  function addSuggestion(suggestion: { name: string; unitPrice: number }) {
+    setItems((current) => {
+      const existing = current.find((item) => item.name.trim().toLocaleLowerCase("es-MX") === suggestion.name.toLocaleLowerCase("es-MX"));
+      if (existing) return current.map((item) => item.id === existing.id ? { ...item, quantity: item.quantity + 1 } : item);
+      const blank = current.find((item) => !item.name.trim() && !item.unitPrice);
+      if (blank) return current.map((item) => item.id === blank.id ? { ...item, name: suggestion.name, unitPrice: String(suggestion.unitPrice) } : item);
+      return [...current, { id: createId(), name: suggestion.name, quantity: 1, unitPrice: String(suggestion.unitPrice) }];
+    });
+  }
+
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    const invalid = items.find((item) => !item.name.trim() || safeNumber(item.unitPrice) <= 0 || item.quantity < 1);
+    if (invalid) return toast.error("Completa el producto y su precio");
+    const saleItems = items.map((item) => ({ id: item.id, name: item.name.trim(), quantity: item.quantity, unitPrice: safeNumber(item.unitPrice) }));
+    const note = saleItems.map((item) => `${item.quantity}× ${item.name}`).join(", ");
+    onSave({ kind: "sale", amount: total, note, party: "", paymentMethod: method, affectsCash: method === "cash", items: saleItems }, movement?.id);
+  }
+
   return (
-    <section className="form-page page-enter"><PageHeader eyebrow={movement ? "Editar movimiento" : "Registrar"} title={movement ? "Editar venta" : "Nueva venta"} onBack={onBack} /><form onSubmit={submit}>
-      <label className="field-label" htmlFor="sale-amount">Monto de la venta</label><div className="money-input featured"><span>$</span><input id="sale-amount" autoFocus inputMode="decimal" placeholder="0.00" value={amount} onChange={(event) => setAmount(event.target.value)} /></div>
-      <label className="field-label">Método de pago</label><PaymentPicker value={method} onChange={setMethod} />
-      <div className={`cash-impact ${method === "cash" ? "yes" : "no"}`}><span>{method === "cash" ? <Banknote /> : <CreditCard />}</span><p><strong>{method === "cash" ? "Sí aumenta la caja" : "No cambia el efectivo"}</strong><small>{method === "cash" ? "Esta venta se sumará al efectivo esperado." : "La venta cuenta en el total, pero no en la caja física."}</small></p></div>
-      <label className="field-label" htmlFor="sale-note">Concepto <small>Opcional</small></label><input className="text-input" id="sale-note" placeholder="Ej. Refrescos y botanas" value={note} onChange={(event) => setNote(event.target.value)} />
-      <button className="primary-button form-submit" type="submit"><Check />{movement ? "Guardar cambios" : "Guardar venta"}</button>{movement && <DeleteMovement id={movement.id} onDelete={onDelete} />}
-    </form></section>
+    <section className="form-page sale-page page-enter">
+      <PageHeader eyebrow={movement ? "Editar ticket" : "Registrar"} title={movement ? "Editar venta" : "Nueva venta"} onBack={onBack} />
+      <form onSubmit={submit} className="sale-ticket-form">
+        {suggestions.length > 0 && !movement && (
+          <section className="quick-products">
+            <div><span className="eyebrow">Toque rápido</span><small>Al tocar otra vez, suma una unidad</small></div>
+            <div>{suggestions.map((suggestion) => <button key={suggestion.name} type="button" onClick={() => addSuggestion(suggestion)}><Plus />{suggestion.name}<small>{money.format(suggestion.unitPrice)}</small></button>)}</div>
+          </section>
+        )}
+
+        <section className="ticket-builder">
+          <div className="ticket-heading"><div><span className="eyebrow">Ticket</span><h2>¿Qué se llevaron?</h2></div><span>{totalUnits} {totalUnits === 1 ? "artículo" : "artículos"}</span></div>
+          <div className="ticket-items">
+            {items.map((item, index) => (
+              <article className="ticket-item" key={item.id}>
+                <div className="ticket-item-top"><span>{index + 1}</span><label htmlFor={`product-${item.id}`}>Producto</label>{items.length > 1 && <button type="button" aria-label={`Quitar ${item.name || `producto ${index + 1}`}`} onClick={() => setItems((current) => current.filter((currentItem) => currentItem.id !== item.id))}><Trash2 /></button>}</div>
+                <input id={`product-${item.id}`} className="product-input" autoFocus={index === 0 && !movement} placeholder="Ej. Peñafiel Twist" value={item.name} onChange={(event) => updateItem(item.id, { name: event.target.value })} />
+                <div className="item-numbers">
+                  <div><small>Cantidad</small><span className="quantity-stepper"><button type="button" aria-label="Restar uno" onClick={() => changeQuantity(item.id, -1)} disabled={item.quantity === 1}><Minus /></button><strong>{item.quantity}</strong><button type="button" aria-label="Sumar uno" onClick={() => changeQuantity(item.id, 1)}><Plus /></button></span></div>
+                  <label htmlFor={`price-${item.id}`}><small>Precio unitario</small><span className="unit-price"><b>$</b><input id={`price-${item.id}`} aria-label={`Precio de ${item.name || `producto ${index + 1}`}`} inputMode="decimal" placeholder="0.00" value={item.unitPrice} onChange={(event) => updateItem(item.id, { unitPrice: event.target.value })} /></span></label>
+                  <div className="item-subtotal"><small>Subtotal</small><strong>{money.format(safeNumber(item.unitPrice) * item.quantity)}</strong></div>
+                </div>
+              </article>
+            ))}
+          </div>
+          <button className="add-item-button" type="button" onClick={() => setItems((current) => [...current, blankItem()])}><Plus /> Agregar otro producto</button>
+          <div className="ticket-total"><span><ShoppingCart /><small>Total del ticket</small></span><strong>{money.format(total)}</strong></div>
+        </section>
+
+        <label className="field-label">Método de pago</label><PaymentPicker value={method} onChange={setMethod} />
+        <div className={`cash-impact ${method === "cash" ? "yes" : "no"}`}><span>{method === "cash" ? <Banknote /> : <CreditCard />}</span><p><strong>{method === "cash" ? "Sí aumenta la caja" : "No cambia el efectivo"}</strong><small>{method === "cash" ? "El total del ticket se sumará al efectivo esperado." : "La venta cuenta en el total, pero no en la caja física."}</small></p></div>
+        <button className="primary-button form-submit" type="submit" disabled={total <= 0}><Check />{movement ? "Guardar cambios" : "Cobrar y guardar"} · {money.format(total)}</button>
+        {movement && <DeleteMovement id={movement.id} onDelete={onDelete} />}
+      </form>
+    </section>
   );
 }
 
@@ -531,14 +694,14 @@ function CloseView({ shift, summary, onClose, onShare, onDownload, onBack }: { s
   const previewDifference = counted.trim() ? safeNumber(counted) - summary.expectedCash : null;
   if (shift.status === "closed") {
     const difference = summary.difference ?? 0;
-    return <section className="close-page page-enter"><PageHeader eyebrow="Turno cerrado" title="Corte de caja" onBack={onBack} /><div className={`result-card ${difference === 0 ? "exact" : difference > 0 ? "over" : "short"}`}><span>{difference === 0 ? <Check /> : <CircleDollarSign />}</span><small>Resultado</small><h2>{difference === 0 ? "Caja exacta" : difference > 0 ? "Sobrante" : "Faltante"}</h2><strong>{money.format(Math.abs(difference))}</strong><p>{difference === 0 ? "El efectivo contado coincide con lo esperado." : `Contaste ${money.format(shift.countedCash ?? 0)} y esperábamos ${money.format(summary.expectedCash)}.`}</p></div><CutSummary shift={shift} summary={summary} /><div className="share-actions sticky-actions"><button className="primary-button whatsapp" onClick={onShare}><Share2 /> Compartir corte</button><button className="secondary-button" onClick={onDownload}><Download /> Descargar PDF</button></div></section>;
+    return <section className="close-page page-enter"><PageHeader eyebrow="Turno cerrado" title="Corte de caja" onBack={onBack} /><div className={`result-card ${difference === 0 ? "exact" : difference > 0 ? "over" : "short"}`}><span>{difference === 0 ? <Check /> : <CircleDollarSign />}</span><small>Resultado</small><h2>{difference === 0 ? "Caja exacta" : difference > 0 ? "Sobrante" : "Faltante"}</h2><strong>{money.format(Math.abs(difference))}</strong><p>{difference === 0 ? "El efectivo contado coincide con lo esperado." : `Contaste ${money.format(shift.countedCash ?? 0)} y esperábamos ${money.format(summary.expectedCash)}.`}</p></div><CutSummary shift={shift} summary={summary} /><InsightPanel summary={summary} compact /><div className="share-actions sticky-actions"><button className="primary-button whatsapp" onClick={onShare}><Share2 /> Compartir corte</button><button className="secondary-button" onClick={onDownload}><Download /> Descargar PDF</button></div></section>;
   }
   return (
     <section className="close-page page-enter"><PageHeader eyebrow="Último paso" title="Cierre de caja" onBack={onBack} /><div className="count-prompt"><span><CircleDollarSign /></span><h2>Cuenta el efectivo</h2><p>Incluye la base y todo el dinero físico que quedó en caja.</p></div><form>
       <label className="field-label" htmlFor="counted-cash">Efectivo contado</label><div className="money-input featured"><span>$</span><input id="counted-cash" autoFocus inputMode="decimal" placeholder="0.00" value={counted} onChange={(event) => setCounted(event.target.value)} /></div>
       <div className="expected-row"><span>Efectivo esperado</span><strong>{money.format(summary.expectedCash)}</strong></div>{previewDifference != null && <div className={`difference-preview ${previewDifference === 0 ? "exact" : previewDifference > 0 ? "over" : "short"}`}><small>Diferencia</small><strong>{previewDifference === 0 ? "Exacto" : `${previewDifference > 0 ? "+" : "−"}${money.format(Math.abs(previewDifference))}`}</strong></div>}
       <AlertDialog><AlertDialogTrigger asChild><button className="primary-button form-submit" type="button" disabled={!counted.trim()}><Check /> Revisar y cerrar turno</button></AlertDialogTrigger><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>¿Cerrar el turno?</AlertDialogTitle><AlertDialogDescription>Después del cierre ya no podrás editar los movimientos. Podrás descargar y compartir el corte en PDF.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Seguir revisando</AlertDialogCancel><AlertDialogAction onClick={() => onClose(safeNumber(counted))}>Sí, cerrar turno</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
-    </form><CutSummary shift={shift} summary={summary} /></section>
+    </form><CutSummary shift={shift} summary={summary} /><InsightPanel summary={summary} compact /></section>
   );
 }
 

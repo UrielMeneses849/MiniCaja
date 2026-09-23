@@ -236,6 +236,79 @@ button:focus-visible, input:focus-visible { outline: 3px solid color-mix(in srgb
 .toggle-row input:checked + i { background: var(--brand); }
 .toggle-row input:checked + i::after { transform: translateX(18px); }
 
+.form-page form.sale-ticket-form { background: transparent; border: 0; border-radius: 0; padding: 0; box-shadow: none; }
+.quick-products { margin-bottom: 13px; padding: 14px; background: #e8eee5; border: 1px solid #d9e2d8; border-radius: 19px; }
+.quick-products > div:first-child { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.quick-products > div:first-child small { color: var(--muted); font-size: .65rem; }
+.quick-products > div:last-child { display: flex; gap: 7px; overflow-x: auto; scrollbar-width: none; padding-bottom: 1px; }
+.quick-products > div:last-child::-webkit-scrollbar { display: none; }
+.quick-products button { flex: 0 0 auto; min-height: 42px; padding: 6px 11px; border: 1px solid #cdd9d1; border-radius: 13px; background: white; display: grid; grid-template-columns: 15px auto; column-gap: 5px; align-items: center; text-align: left; color: var(--ink); font-size: .74rem; font-weight: 780; cursor: pointer; }
+.quick-products button svg { width: 14px; color: var(--brand); }
+.quick-products button small { grid-column: 2; color: var(--muted); font-size: .61rem; font-weight: 650; }
+.ticket-builder { padding: 18px; background: white; border: 1px solid var(--line); border-radius: 24px; box-shadow: 0 8px 24px rgb(20 40 32 / 5%); }
+.ticket-heading { display: flex; justify-content: space-between; align-items: flex-end; gap: 14px; margin-bottom: 14px; }
+.ticket-heading h2 { margin: 3px 0 0; font-size: 1.18rem; letter-spacing: -.025em; }
+.ticket-heading > span { border-radius: 99px; padding: 6px 9px; background: #eff3ef; color: var(--muted); font-size: .67rem; font-weight: 750; white-space: nowrap; }
+.ticket-items { display: grid; gap: 10px; }
+.ticket-item { padding: 13px; border: 1px solid #e3e7e2; border-radius: 17px; background: #fafbf9; }
+.ticket-item-top { min-height: 28px; display: grid; grid-template-columns: 24px 1fr 30px; align-items: center; gap: 7px; }
+.ticket-item-top > span { width: 24px; height: 24px; border-radius: 8px; display: grid; place-items: center; background: var(--brand-pale); color: var(--brand); font-size: .69rem; font-weight: 850; }
+.ticket-item-top label { font-size: .72rem; font-weight: 800; color: var(--muted); }
+.ticket-item-top button { width: 30px; height: 30px; border: 0; border-radius: 9px; background: #f6e9e9; color: var(--red); display: grid; place-items: center; cursor: pointer; }
+.ticket-item-top button svg { width: 15px; }
+.product-input { width: 100%; height: 47px; margin-top: 6px; border: 1px solid #d6ddd7; border-radius: 12px; padding: 0 12px; background: white; color: var(--ink); font-weight: 750; outline: 0; }
+.product-input::placeholder { color: #a4afa9; font-weight: 550; }
+.item-numbers { display: grid; grid-template-columns: .9fr 1.1fr; gap: 10px; margin-top: 11px; }
+.item-numbers > div, .item-numbers > label { min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.item-numbers small { color: var(--muted); font-size: .62rem; font-weight: 700; }
+.quantity-stepper { height: 40px; border: 1px solid #d6ddd7; border-radius: 12px; background: white; display: grid; grid-template-columns: 38px 1fr 38px; align-items: center; }
+.quantity-stepper button { width: 38px; height: 38px; border: 0; background: transparent; display: grid; place-items: center; color: var(--brand); cursor: pointer; }
+.quantity-stepper button:disabled { color: #bdc5c0; }
+.quantity-stepper button svg { width: 15px; }
+.quantity-stepper strong { text-align: center; font-size: .86rem; }
+.unit-price { height: 40px; border: 1px solid #d6ddd7; border-radius: 12px; background: white; display: flex; align-items: center; padding: 0 9px; }
+.unit-price b { color: var(--muted); font-size: .8rem; }
+.unit-price input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; padding-left: 5px; font-size: .86rem; font-weight: 780; }
+.item-subtotal { grid-column: 1 / -1; padding-top: 3px; flex-direction: row !important; justify-content: space-between; align-items: center; border-top: 1px dashed #dfe4df; }
+.item-subtotal strong { font-size: .86rem; }
+.add-item-button { width: 100%; min-height: 48px; margin-top: 11px; border: 1px dashed #aebdb4; border-radius: 14px; background: #f6f8f5; color: var(--brand); display: flex; align-items: center; justify-content: center; gap: 7px; font-size: .77rem; font-weight: 800; cursor: pointer; }
+.add-item-button svg { width: 16px; }
+.ticket-total { min-height: 74px; margin-top: 14px; border-radius: 17px; background: var(--brand); color: white; padding: 12px 15px; display: flex; justify-content: space-between; align-items: center; gap: 15px; }
+.ticket-total > span { display: flex; align-items: center; gap: 8px; }
+.ticket-total svg { width: 20px; color: var(--lime); }
+.ticket-total small { color: #cce2d7; font-weight: 750; }
+.ticket-total > strong { font-size: 1.45rem; letter-spacing: -.035em; white-space: nowrap; }
+.sale-ticket-form > .field-label { margin-top: 22px; }
+
+.insights-block { grid-column: 1 / -1; }
+.insight-icon { width: 36px; height: 36px; border-radius: 11px; display: grid; place-items: center; background: var(--brand); color: white; }
+.insight-icon svg { width: 18px; }
+.insight-metrics { display: grid; grid-template-columns: .78fr .9fr 1.35fr; gap: 8px; }
+.insight-metrics article { min-width: 0; padding: 11px; border-radius: 15px; background: #f2f5f1; display: grid; grid-template-columns: 26px 1fr; column-gap: 7px; align-items: center; }
+.insight-metrics article > span { grid-row: 1 / 3; width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; background: white; color: var(--brand); }
+.insight-metrics svg { width: 14px; }
+.insight-metrics small { min-width: 0; color: var(--muted); font-size: .59rem; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.insight-metrics strong { min-width: 0; font-size: .82rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.top-products { margin-top: 17px; padding-top: 14px; border-top: 1px solid #e7ebe6; }
+.top-products-heading { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 9px; }
+.top-products-heading > strong { font-size: .78rem; }
+.top-products-heading small { color: var(--muted); font-size: .65rem; }
+.product-rank { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; gap: 9px; align-items: center; padding: 8px 0; }
+.rank-number { width: 24px; height: 24px; border-radius: 8px; display: grid; place-items: center; background: #edf2ed; color: var(--brand); font-size: .66rem; font-weight: 850; }
+.product-rank > div { min-width: 0; }
+.product-rank p { margin: 0 0 5px; display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.product-rank p strong { min-width: 0; font-size: .75rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.product-rank p small { color: var(--muted); font-size: .6rem; white-space: nowrap; }
+.product-rank i { height: 5px; display: block; overflow: hidden; border-radius: 99px; background: #edf1ed; }
+.product-rank i b { height: 100%; display: block; border-radius: inherit; background: linear-gradient(90deg, var(--brand), #5fa47e); }
+.product-rank > strong { font-size: .74rem; white-space: nowrap; }
+.insight-empty { min-height: 84px; margin-top: 13px; border-top: 1px solid #e7ebe6; padding: 15px 4px 2px; display: flex; align-items: center; justify-content: center; gap: 10px; color: var(--muted); }
+.insight-empty > svg { width: 24px; }
+.insight-empty span { display: flex; flex-direction: column; }
+.insight-empty strong { color: var(--ink); font-size: .76rem; }
+.insight-empty small { font-size: .65rem; margin-top: 2px; }
+.close-page .insights-block { margin-top: 16px; }
+
 .count-prompt { text-align: center; padding: 12px 20px 22px; }
 .count-prompt > span { width: 55px; height: 55px; margin: 0 auto 10px; display: grid; place-items: center; border-radius: 18px; background: var(--brand-pale); color: var(--brand); }
 .count-prompt h2 { margin: 0; font-size: 1.25rem; }
@@ -284,6 +357,8 @@ button:focus-visible, input:focus-visible { outline: 3px solid color-mix(in srgb
   .hero-card { padding: 30px; }
   .quick-actions { grid-template-columns: 1fr 1fr; }
   .action-card { min-height: 126px; }
+  .item-numbers { grid-template-columns: .8fr 1fr .9fr; align-items: end; }
+  .item-subtotal { grid-column: auto; padding-top: 0; border-top: 0; }
   .bottom-nav { left: 50%; right: auto; bottom: 18px; transform: translateX(-50%); width: 450px; height: 72px; padding: 7px; border: 1px solid var(--line); border-radius: 22px; box-shadow: 0 16px 50px rgb(20 40 32 / 16%); }
   .app-shell { padding-bottom: 120px; }
 }
