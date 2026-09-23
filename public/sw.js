@@ -1,7 +1,7 @@
-const CACHE = "minicaja-v1";
+const CACHE = "minicaja-v2";
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(["/", "/manifest.webmanifest", "/favicon.svg"])));
+  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(["/", "/manifest.webmanifest", "/favicon.svg", "/fonts/Poppins-Regular.ttf", "/fonts/Poppins-SemiBold.ttf"])));
   self.skipWaiting();
 });
 

@@ -202,81 +202,275 @@ function summarize(shift: Shift) {
   return { sales, salesTotal, saleCount, unitsSold, averageTicket, topProducts, providerTotal, providerCash, entries, withdrawals, expenses, otherCashNet, expectedCash, difference };
 }
 
-function ascii(value: string) {
-  return value
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^\x20-\x7E]/g, "?")
-    .replace(/\\/g, "\\\\")
-    .replace(/\(/g, "\\(")
-    .replace(/\)/g, "\\)");
+let poppinsFonts: Promise<{ regular: string; semibold: string }> | null = null;
+
+function arrayBufferToBase64(buffer: ArrayBuffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  for (let offset = 0; offset < bytes.length; offset += 8192) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 8192));
+  }
+  return window.btoa(binary);
 }
 
-function createPdf(shift: Shift) {
-  const summary = summarize(shift);
-  const opened = new Date(shift.openedAt).toLocaleString("es-MX", { dateStyle: "medium", timeStyle: "short" });
-  const lines = [
-    "CORTE DE CAJA",
-    `Turno: ${opened}`,
-    "",
-    `Base inicial: ${money.format(shift.base)}`,
-    `Ventas totales: ${money.format(summary.salesTotal)}`,
-    `  Efectivo: ${money.format(summary.sales.cash)}`,
-    `  Tarjeta: ${money.format(summary.sales.card)}`,
-    `  Transferencia: ${money.format(summary.sales.transfer)}`,
-    `Pagos a proveedores: ${money.format(summary.providerTotal)}`,
-    `  Salida de caja: ${money.format(summary.providerCash)}`,
-    `Entradas extra: ${money.format(summary.entries)}`,
-    `Retiros: ${money.format(summary.withdrawals)}`,
-    `Gastos: ${money.format(summary.expenses)}`,
-    "",
-    `Efectivo esperado: ${money.format(summary.expectedCash)}`,
-    `Efectivo contado: ${money.format(shift.countedCash ?? 0)}`,
-    `Diferencia: ${money.format(summary.difference ?? 0)}`,
-    "",
-    "INDICADORES DEL TURNO",
-    `Tickets: ${summary.saleCount}`,
-    `Articulos vendidos: ${summary.unitsSold}`,
-    `Ticket promedio: ${money.format(summary.averageTicket)}`,
-    ...summary.topProducts.map((product, index) => `${index + 1}. ${product.name} - ${product.units} uds - ${money.format(product.revenue)}`),
-    "",
-    "MOVIMIENTOS",
-    ...shift.movements.map((movement) => {
-      const time = new Date(movement.createdAt).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" });
-      const name = movement.party || movement.note || kindLabels[movement.kind];
-      return `${time}  ${kindLabels[movement.kind]} - ${name} - ${paymentLabels[movement.paymentMethod]} - ${money.format(movement.amount)}`;
-    }),
-    "",
-    "Generado con MiniCaja",
-  ];
-
-  const pages: string[][] = [];
-  for (let index = 0; index < lines.length; index += 43) pages.push(lines.slice(index, index + 43));
-  const objects: string[] = [];
-  const pageRefs = pages.map((_, index) => `${3 + index * 2} 0 R`).join(" ");
-  const fontObject = 3 + pages.length * 2;
-  objects[1] = "<< /Type /Catalog /Pages 2 0 R >>";
-  objects[2] = `<< /Type /Pages /Kids [${pageRefs}] /Count ${pages.length} >>`;
-  pages.forEach((page, index) => {
-    const pageObject = 3 + index * 2;
-    const contentObject = pageObject + 1;
-    const body = page.map((line, lineIndex) => lineIndex === 0 ? `/F1 17 Tf (${ascii(line).slice(0, 95)}) Tj /F1 10 Tf 0 -28 Td` : `(${ascii(line).slice(0, 95)}) Tj T*`).join("\n");
-    const stream = `BT 50 748 Td 14 TL\n${body}\nET`;
-    objects[pageObject] = `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 ${fontObject} 0 R >> >> /Contents ${contentObject} 0 R >>`;
-    objects[contentObject] = `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`;
-  });
-  objects[fontObject] = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>";
-  let pdf = "%PDF-1.4\n";
-  const offsets = [0];
-  for (let index = 1; index < objects.length; index += 1) {
-    offsets[index] = pdf.length;
-    pdf += `${index} 0 obj\n${objects[index]}\nendobj\n`;
+function loadPoppinsFonts() {
+  if (!poppinsFonts) {
+    poppinsFonts = Promise.all([
+      fetch("/fonts/Poppins-Regular.ttf").then((response) => {
+        if (!response.ok) throw new Error("No se pudo cargar Poppins Regular");
+        return response.arrayBuffer();
+      }),
+      fetch("/fonts/Poppins-SemiBold.ttf").then((response) => {
+        if (!response.ok) throw new Error("No se pudo cargar Poppins SemiBold");
+        return response.arrayBuffer();
+      }),
+    ]).then(([regular, semibold]) => ({ regular: arrayBufferToBase64(regular), semibold: arrayBufferToBase64(semibold) }));
   }
-  const xref = pdf.length;
-  pdf += `xref\n0 ${objects.length}\n0000000000 65535 f \n`;
-  for (let index = 1; index < objects.length; index += 1) pdf += `${String(offsets[index]).padStart(10, "0")} 00000 n \n`;
-  pdf += `trailer\n<< /Size ${objects.length} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`;
-  return new Blob([pdf], { type: "application/pdf" });
+  return poppinsFonts;
+}
+
+function shortText(value: string, max = 34) {
+  return value.length > max ? `${value.slice(0, max - 1)}…` : value;
+}
+
+async function createPdf(shift: Shift) {
+  const summary = summarize(shift);
+  const [{ jsPDF }, fonts] = await Promise.all([import("jspdf"), loadPoppinsFonts()]);
+  const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "letter", compress: true });
+  doc.addFileToVFS("Poppins-Regular.ttf", fonts.regular);
+  doc.addFont("Poppins-Regular.ttf", "Poppins", "normal");
+  doc.addFileToVFS("Poppins-SemiBold.ttf", fonts.semibold);
+  doc.addFont("Poppins-SemiBold.ttf", "Poppins", "bold");
+  doc.setFont("Poppins", "normal");
+  doc.setProperties({ title: "Corte de caja · MiniCaja", subject: "Resumen del turno", author: "MiniCaja", creator: "MiniCaja" });
+
+  const pageWidth = 612;
+  const pageHeight = 792;
+  const margin = 36;
+  const ink = "#14332A";
+  const muted = "#718078";
+  const paper = "#F7F6F0";
+  const white = "#FFFFFF";
+  const green = "#0D5B3E";
+  const mint = "#DDF2E8";
+  const lime = "#C7F36A";
+  const coral = "#F39A7C";
+  const blue = "#7EBBD3";
+  const border = "#E2E5DE";
+  const format = (value: number) => money.format(value).replace("MXN", "").trim();
+  const difference = summary.difference ?? 0;
+  const resultLabel = difference === 0 ? "CAJA EXACTA" : difference > 0 ? "SOBRANTE" : "FALTANTE";
+  const openedDate = new Date(shift.openedAt);
+  const closedDate = new Date(shift.closedAt ?? Date.now());
+  const dateLabel = openedDate.toLocaleDateString("es-MX", { day: "numeric", month: "long", year: "numeric" });
+  const timeLabel = `${openedDate.toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" })} — ${closedDate.toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" })}`;
+
+  const setFont = (size: number, weight: "normal" | "bold" = "normal", color = ink) => {
+    doc.setFont("Poppins", weight);
+    doc.setFontSize(size);
+    doc.setTextColor(color);
+  };
+  const card = (x: number, y: number, width: number, height: number, fill = white) => {
+    doc.setFillColor(fill);
+    doc.setDrawColor(border);
+    doc.roundedRect(x, y, width, height, 12, 12, "FD");
+  };
+  const sectionTitle = (label: string, x: number, y: number) => {
+    setFont(8, "bold", muted);
+    doc.text(label.toUpperCase(), x, y, { charSpace: 1.15 });
+  };
+  const footer = (page: number) => {
+    setFont(7.5, "normal", muted);
+    doc.text("Generado de forma privada en tu dispositivo con MiniCaja", margin, pageHeight - 21);
+    doc.text(`${page}`, pageWidth - margin, pageHeight - 21, { align: "right" });
+  };
+  const paintPage = () => {
+    doc.setFillColor(paper);
+    doc.rect(0, 0, pageWidth, pageHeight, "F");
+  };
+
+  paintPage();
+  doc.setFillColor(green);
+  doc.roundedRect(margin, 28, pageWidth - margin * 2, 126, 17, 17, "F");
+  doc.setFillColor(white);
+  doc.roundedRect(54, 46, 32, 32, 8, 8, "F");
+  doc.setDrawColor(green);
+  doc.setLineWidth(1.6);
+  doc.line(63, 55, 77, 55);
+  doc.line(63, 61, 77, 61);
+  doc.line(63, 67, 73, 67);
+  setFont(12, "bold", white);
+  doc.text("MiniCaja", 98, 66);
+  const pillWidth = 98;
+  doc.setFillColor(difference < 0 ? coral : lime);
+  doc.roundedRect(pageWidth - margin - pillWidth - 18, 47, pillWidth, 27, 13.5, 13.5, "F");
+  setFont(7.5, "bold", green);
+  doc.text(resultLabel, pageWidth - margin - pillWidth / 2 - 18, 64.5, { align: "center", charSpace: 0.55 });
+  setFont(23, "bold", white);
+  doc.text("Corte de caja", 54, 113);
+  setFont(8.5, "normal", "#D8E9E1");
+  doc.text(`${dateLabel}  ·  ${timeLabel}`, 54, 134);
+
+  const kpiY = 172;
+  const kpiGap = 9;
+  const kpiWidth = (pageWidth - margin * 2 - kpiGap * 2) / 3;
+  [
+    { label: "EFECTIVO ESPERADO", value: format(summary.expectedCash), color: mint },
+    { label: "EFECTIVO CONTADO", value: format(shift.countedCash ?? 0), color: white },
+    { label: "DIFERENCIA", value: `${difference > 0 ? "+" : ""}${format(difference)}`, color: difference === 0 ? "#F0F8DA" : "#FFF0E9" },
+  ].forEach((item, index) => {
+    const x = margin + index * (kpiWidth + kpiGap);
+    card(x, kpiY, kpiWidth, 72, item.color);
+    setFont(6.8, "bold", muted);
+    doc.text(item.label, x + 14, kpiY + 21, { charSpace: 0.55 });
+    setFont(15.5, "bold", ink);
+    doc.text(item.value, x + 14, kpiY + 49);
+  });
+
+  const panelY = 262;
+  const panelGap = 12;
+  const panelWidth = (pageWidth - margin * 2 - panelGap) / 2;
+  card(margin, panelY, panelWidth, 168);
+  sectionTitle("Ventas por método", margin + 16, panelY + 24);
+  setFont(19, "bold", ink);
+  doc.text(format(summary.salesTotal), margin + 16, panelY + 51);
+  setFont(7.5, "normal", muted);
+  doc.text("ventas totales", margin + 16, panelY + 67);
+  const paymentRows = [
+    { label: "Efectivo", value: summary.sales.cash, color: green },
+    { label: "Tarjeta", value: summary.sales.card, color: blue },
+    { label: "Transferencia", value: summary.sales.transfer, color: coral },
+  ];
+  paymentRows.forEach((row, index) => {
+    const y = panelY + 88 + index * 24;
+    setFont(7.5, "normal", ink);
+    doc.text(row.label, margin + 16, y);
+    setFont(7.5, "bold", ink);
+    doc.text(format(row.value), margin + panelWidth - 16, y, { align: "right" });
+    doc.setFillColor("#EDF0EA");
+    doc.roundedRect(margin + 16, y + 6, panelWidth - 32, 5, 2.5, 2.5, "F");
+    if (row.value > 0 && summary.salesTotal > 0) {
+      doc.setFillColor(row.color);
+      doc.roundedRect(margin + 16, y + 6, Math.max(5, (panelWidth - 32) * row.value / summary.salesTotal), 5, 2.5, 2.5, "F");
+    }
+  });
+
+  const cashX = margin + panelWidth + panelGap;
+  card(cashX, panelY, panelWidth, 168);
+  sectionTitle("Flujo de efectivo", cashX + 16, panelY + 24);
+  const cashRows = [
+    ["Base inicial", shift.base, "+"],
+    ["Ventas en efectivo", summary.sales.cash, "+"],
+    ["Proveedores", summary.providerCash, "−"],
+    ["Otros movimientos", Math.abs(summary.otherCashNet), summary.otherCashNet >= 0 ? "+" : "−"],
+  ] as const;
+  cashRows.forEach(([label, value, sign], index) => {
+    const y = panelY + 52 + index * 24;
+    setFont(7.8, "normal", muted);
+    doc.text(label, cashX + 16, y);
+    setFont(8, "bold", ink);
+    doc.text(`${sign} ${format(value)}`, cashX + panelWidth - 16, y, { align: "right" });
+    if (index < cashRows.length - 1) {
+      doc.setDrawColor(border);
+      doc.line(cashX + 16, y + 9, cashX + panelWidth - 16, y + 9);
+    }
+  });
+  doc.setFillColor(mint);
+  doc.roundedRect(cashX + 12, panelY + 139, panelWidth - 24, 20, 8, 8, "F");
+  setFont(7.4, "bold", green);
+  doc.text("EFECTIVO ESPERADO", cashX + 22, panelY + 152.5);
+  doc.text(format(summary.expectedCash), cashX + panelWidth - 22, panelY + 152.5, { align: "right" });
+
+  card(margin, 448, pageWidth - margin * 2, 70);
+  sectionTitle("El turno en números", margin + 16, 471);
+  [
+    [String(summary.saleCount), "Tickets"],
+    [String(summary.unitsSold), "Artículos"],
+    [format(summary.averageTicket), "Ticket promedio"],
+    [format(summary.providerTotal), "Proveedores"],
+  ].forEach(([value, label], index) => {
+    const x = margin + 16 + index * 127;
+    setFont(12, "bold", ink);
+    doc.text(value, x, 495);
+    setFont(6.8, "normal", muted);
+    doc.text(label, x, 508);
+  });
+
+  card(margin, 536, pageWidth - margin * 2, 208);
+  sectionTitle("Productos destacados", margin + 16, 560);
+  if (!summary.topProducts.length) {
+    setFont(8.5, "normal", muted);
+    doc.text("Aún no hay productos con detalle en este turno.", margin + 16, 594);
+  } else {
+    const maxRevenue = Math.max(...summary.topProducts.map((product) => product.revenue), 1);
+    summary.topProducts.forEach((product, index) => {
+      const y = 586 + index * 29;
+      doc.setFillColor(index === 0 ? lime : "#EDF0EA");
+      doc.circle(margin + 27, y - 2, 9, "F");
+      setFont(7.5, "bold", green);
+      doc.text(String(index + 1), margin + 27, y + 0.5, { align: "center" });
+      setFont(8, "bold", ink);
+      doc.text(shortText(product.name, 31), margin + 44, y);
+      setFont(7.5, "normal", muted);
+      doc.text(`${product.units} uds`, margin + 263, y, { align: "right" });
+      doc.setFillColor("#EDF0EA");
+      doc.roundedRect(margin + 281, y - 7, 142, 7, 3.5, 3.5, "F");
+      doc.setFillColor(index === 0 ? green : "#7FA795");
+      doc.roundedRect(margin + 281, y - 7, Math.max(6, 142 * product.revenue / maxRevenue), 7, 3.5, 3.5, "F");
+      setFont(8, "bold", ink);
+      doc.text(format(product.revenue), pageWidth - margin - 16, y, { align: "right" });
+    });
+  }
+  footer(1);
+
+  if (shift.movements.length) {
+    const rowsPerPage = 17;
+    const chunks: Movement[][] = [];
+    for (let index = 0; index < shift.movements.length; index += rowsPerPage) chunks.push(shift.movements.slice(index, index + rowsPerPage));
+    chunks.forEach((movements, chunkIndex) => {
+      doc.addPage();
+      paintPage();
+      doc.setFillColor(green);
+      doc.roundedRect(margin, 28, pageWidth - margin * 2, 72, 15, 15, "F");
+      setFont(11, "bold", white);
+      doc.text("MiniCaja", margin + 18, 55);
+      setFont(18, "bold", white);
+      doc.text("Detalle de movimientos", margin + 18, 82);
+      setFont(8, "normal", "#D8E9E1");
+      doc.text(`${dateLabel} · ${shift.movements.length} movimientos`, pageWidth - margin - 18, 55, { align: "right" });
+      card(margin, 118, pageWidth - margin * 2, 592);
+      setFont(7, "bold", muted);
+      doc.text("HORA", margin + 16, 143);
+      doc.text("MOVIMIENTO", margin + 72, 143);
+      doc.text("MÉTODO", margin + 365, 143);
+      doc.text("MONTO", pageWidth - margin - 16, 143, { align: "right" });
+      doc.setDrawColor(border);
+      doc.line(margin + 16, 153, pageWidth - margin - 16, 153);
+      movements.forEach((movement, index) => {
+        const y = 178 + index * 31;
+        const time = new Date(movement.createdAt).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" });
+        const itemCount = saleItemsFor(movement).reduce((sum, item) => sum + item.quantity, 0);
+        const name = movement.party || movement.note || (movement.kind === "sale" ? `${itemCount} artículos` : kindLabels[movement.kind]);
+        setFont(7.3, "normal", muted);
+        doc.text(time, margin + 16, y);
+        doc.setFillColor(movement.kind === "sale" ? mint : "#F1EEE7");
+        doc.roundedRect(margin + 72, y - 12, 58, 18, 8, 8, "F");
+        setFont(6.5, "bold", movement.kind === "sale" ? green : muted);
+        doc.text(kindLabels[movement.kind].toUpperCase(), margin + 101, y - 0.5, { align: "center" });
+        setFont(7.7, "normal", ink);
+        doc.text(shortText(name, 34), margin + 140, y);
+        setFont(7.3, "normal", muted);
+        doc.text(paymentLabels[movement.paymentMethod], margin + 365, y);
+        setFont(8, "bold", ink);
+        doc.text(format(movement.amount), pageWidth - margin - 16, y, { align: "right" });
+        doc.setDrawColor(border);
+        doc.line(margin + 16, y + 13, pageWidth - margin - 16, y + 13);
+      });
+      footer(chunkIndex + 2);
+    });
+  }
+
+  return doc.output("blob");
 }
 
 function downloadBlob(blob: Blob, fileName: string, open = false) {
@@ -436,10 +630,11 @@ export default function HomePage() {
   async function sharePdf() {
     const current = shiftRef.current;
     if (!current || current.status !== "closed") return;
-    const blob = createPdf(current);
-    const file = new File([blob], fileName, { type: "application/pdf" });
-    const nav = navigator as Navigator & { canShare?: (data: ShareData) => boolean };
+    let blob: Blob | null = null;
     try {
+      blob = await createPdf(current);
+      const file = new File([blob], fileName, { type: "application/pdf" });
+      const nav = navigator as Navigator & { canShare?: (data: ShareData) => boolean };
       if (nav.share && (!nav.canShare || nav.canShare({ files: [file] }))) {
         await nav.share({ title: "Corte de MiniCaja", text: "Te comparto el corte de caja del turno.", files: [file] });
         toast.success("Corte compartido");
@@ -449,9 +644,24 @@ export default function HomePage() {
       }
     } catch (error) {
       if ((error as Error).name !== "AbortError") {
-        downloadBlob(blob, fileName, true);
-        toast.info("PDF descargado. Ya puedes enviarlo por WhatsApp.");
+        if (blob) {
+          downloadBlob(blob, fileName, true);
+          toast.info("PDF descargado. Ya puedes enviarlo por WhatsApp.");
+        } else {
+          toast.error("No pudimos preparar el PDF. Intenta de nuevo.");
+        }
       }
+    }
+  }
+
+  async function downloadPdf() {
+    const current = shiftRef.current;
+    if (!current) return;
+    try {
+      downloadBlob(await createPdf(current), fileName);
+      toast.success("PDF descargado");
+    } catch {
+      toast.error("No pudimos preparar el PDF. Intenta de nuevo.");
     }
   }
 
@@ -465,10 +675,10 @@ export default function HomePage() {
         <span className={`status-pill ${shift.status}`}><span />{shift.status === "open" ? "Turno abierto" : "Turno cerrado"}</span>
       </header>
       <div className="workspace">
-        {view === "home" && summary && <Dashboard shift={shift} summary={summary} onNavigate={goTo} onEdit={editMovement} onShare={sharePdf} onDownload={() => downloadBlob(createPdf(shift), fileName)} onNewShift={() => setShift(null)} />}
+        {view === "home" && summary && <Dashboard shift={shift} summary={summary} onNavigate={goTo} onEdit={editMovement} onShare={sharePdf} onDownload={downloadPdf} onNewShift={() => setShift(null)} />}
         {view === "sale" && <SaleForm movement={editing?.kind === "sale" ? editing : null} suggestions={getProductSuggestions(shift)} onBack={() => goTo("home")} onSave={saveMovement} onDelete={removeMovement} />}
         {view === "movement" && <MovementForm movement={editing && editing.kind !== "sale" ? editing : null} onBack={() => goTo("home")} onSave={saveMovement} onDelete={removeMovement} />}
-        {view === "close" && summary && <CloseView shift={shift} summary={summary} onClose={closeShift} onShare={sharePdf} onDownload={() => downloadBlob(createPdf(shift), fileName)} onBack={() => goTo("home")} />}
+        {view === "close" && summary && <CloseView shift={shift} summary={summary} onClose={closeShift} onShare={sharePdf} onDownload={downloadPdf} onBack={() => goTo("home")} />}
       </div>
       <nav className="bottom-nav" aria-label="Navegación principal">
         <NavButton icon={Home} label="Inicio" active={view === "home"} onClick={() => goTo("home")} />
